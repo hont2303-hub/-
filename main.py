@@ -1,22 +1,34 @@
 """
 note.com 自動投稿システム エントリーポイント
 
-使用方法:
-    # 1サイクルを今すぐ実行
-    python main.py
+## 使い方
 
-    # ドライランモード（投稿しない）
-    python main.py --dry-run
+### ① 記事を生成する（ブラウザ不要・Claude API使用）
+    python main.py --generate
 
-    # スケジューラを起動（毎日POST_TIMEに自動実行）
-    python main.py --schedule
+### ② 投稿待ち記事をタスクファイルに書き出す
+    python main.py --export
 
-    # 特定のエージェントのみ実行
-    python main.py --step analyze   # 分析担当のみ
-    python main.py --step write     # 文章作成のみ
-    python main.py --step image     # 画像生成のみ
-    python main.py --step post      # note投稿のみ
-    python main.py --step tweet     # X投稿のみ
+### ③ 投稿待ち記事の一覧を確認する
+    python main.py --show-pending
+
+### ④ Claudeが投稿した結果をDBに反映する
+    python main.py --sync
+
+### ⑤ 生成＋エクスポートを一括実行
+    python main.py --generate --export
+
+### ⑥ 記事数を指定して生成
+    python main.py --generate --count 3
+
+---
+
+## Claude for Chrome での投稿手順
+
+1. python main.py --generate --export  # 記事生成 & タスクファイル出力
+2. claude --chrome                      # Claude Code + Chrome を起動
+3. 「pending_posts.jsonの記事をnoteに投稿してください」と指示
+4. python main.py --sync                # 投稿結果をDBに反映
 """
 import argparse
 import asyncio
@@ -27,11 +39,8 @@ from shared.database import init_db
 
 
 def setup_logging() -> None:
-    """ログ設定を初期化する"""
     from pathlib import Path
-    log_dir = Path("logs")
-    log_dir.mkdir(exist_ok=True)
-
+    Path("logs").mkdir(exist_ok=True)
     logger.remove()
     logger.add(sys.stderr, level="INFO", format="{time:HH:mm:ss} | {level} | {message}")
     logger.add(
@@ -43,80 +52,73 @@ def setup_logging() -> None:
     )
 
 
-async def run_step(step: str, dry_run: bool = False) -> None:
-    """特定のステップのみを実行する"""
+async def run_generate(count: int) -> None:
+    """記事を生成してDBに保存する（ブラウザ不要）"""
     init_db()
 
-    if step == "analyze":
-        from agents.分析担当.agent import run
-        await run()
+    # STEP 1: トピック分析
+    logger.info("【STEP 1/2】分析担当: トピックを生成します")
+    from agents.分析担当.trend_analyzer import analyze_trends
+    from agents.分析担当.note_scraper import format_articles_for_analysis
+    from shared.database import insert_topic, get_pending_topics
 
-    elif step == "write":
-        from agents.文章作成.agent import run
-        await run()
+    # noteのスクレイピングは省略してClaude APIでトピック直接生成
+    articles_text = format_articles_for_analysis([])  # フォールバックトピックを使用
+    topics = analyze_trends(articles_text)
+    for topic in topics:
+        insert_topic(topic)
+    logger.info(f"  → {len(topics)} 件のトピックを生成しました")
 
-    elif step == "image":
-        from agents.画像図解作成担当.agent import run
-        await run()
+    # STEP 2: 記事生成
+    logger.info(f"【STEP 2/2】文章作成: {count} 件の記事を生成します")
+    from agents.文章作成.agent import run as run_writer
+    articles = await run_writer(count=count)
+    logger.info(f"  → {len(articles)} 件の記事を生成しました")
 
-    elif step == "post":
-        from shared.database import get_ready_articles, update_article_status, get_images_for_article
-        from browser.playwright_manager import get_browser, get_context
-        from note投稿.note_login import ensure_note_login
-        from note投稿.note_publisher import publish_article
-
-        articles = get_ready_articles()
-        if not articles:
-            logger.warning("投稿可能な記事がありません")
-            return
-
-        async with get_browser() as browser:
-            async with get_context("note", browser) as context:
-                page = await ensure_note_login(context)
-                for article in articles:
-                    images = get_images_for_article(article.id)
-                    note_url = await publish_article(page, article, images, dry_run=dry_run)
-                    status = "posted" if note_url else "failed"
-                    update_article_status(article.id, status, note_url)
-                    logger.info(f"{'投稿完了' if note_url else '投稿失敗'}: {article.title}")
-
-    elif step == "tweet":
-        from agents.X投稿.agent import run
-        await run(dry_run=dry_run)
-
-    else:
-        logger.error(f"不明なステップ: {step}")
-        logger.info("使用可能なステップ: analyze / write / image / post / tweet")
-        sys.exit(1)
+    print(f"\n✅ 完了: {len(articles)} 件の記事を生成しました")
+    print("次のステップ: python main.py --export  でタスクファイルを出力してください\n")
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="note.com 自動投稿システム")
-    parser.add_argument("--dry-run", action="store_true", help="投稿をスキップする（テスト用）")
-    parser.add_argument("--schedule", action="store_true", help="スケジューラを起動する")
-    parser.add_argument(
-        "--step",
-        choices=["analyze", "write", "image", "post", "tweet"],
-        help="特定のステップのみ実行する",
+    parser = argparse.ArgumentParser(
+        description="note.com 自動投稿システム",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=__doc__,
     )
+    parser.add_argument("--generate", action="store_true", help="記事を生成する（Claude API使用）")
+    parser.add_argument("--export", action="store_true", help="投稿待ち記事をtasks/pending_posts.jsonに書き出す")
+    parser.add_argument("--show-pending", action="store_true", help="投稿待ち記事の一覧を表示")
+    parser.add_argument("--sync", action="store_true", help="Claude投稿結果をDBに反映する")
+    parser.add_argument("--count", type=int, default=5, help="生成する記事数（デフォルト: 5）")
+    parser.add_argument("--schedule", action="store_true", help="スケジューラを起動（毎日POST_TIMEに自動生成）")
     args = parser.parse_args()
 
     setup_logging()
+    init_db()
 
-    if args.dry_run:
-        logger.info("ドライランモードで実行します（実際の投稿は行いません）")
+    if not any([args.generate, args.export, args.show_pending, args.sync, args.schedule]):
+        parser.print_help()
+        print("\n💡 まずは: python main.py --generate --export")
+        return
+
+    if args.generate:
+        asyncio.run(run_generate(count=args.count))
+
+    if args.export:
+        from tasks.task_manager import export_pending_tasks
+        export_pending_tasks(limit=args.count)
+
+    if args.show_pending:
+        from tasks.task_manager import show_pending
+        show_pending()
+
+    if args.sync:
+        from tasks.task_manager import sync_results_to_db
+        sync_results_to_db()
 
     if args.schedule:
         from orchestrator.scheduler import start_scheduler
-        start_scheduler(dry_run=args.dry_run)
-
-    elif args.step:
-        asyncio.run(run_step(args.step, dry_run=args.dry_run))
-
-    else:
-        from orchestrator.workflow import run_full_cycle
-        stats = asyncio.run(run_full_cycle(dry_run=args.dry_run))
-        logger.info(f"完了: {stats}")
+        start_scheduler()
 
 
 if __name__ == "__main__":
