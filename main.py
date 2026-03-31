@@ -86,23 +86,28 @@ def main() -> None:
         epilog=__doc__,
     )
     parser.add_argument("--generate", action="store_true", help="記事を生成する（Claude API使用）")
-    parser.add_argument("--export", action="store_true", help="投稿待ち記事をtasks/pending_posts.jsonに書き出す")
+    parser.add_argument("--kit",      action="store_true", help="投稿キット（タイトル/本文/タグ/X文）を1ファイルに出力")
+    parser.add_argument("--export",   action="store_true", help="投稿待ち記事をtasks/pending_posts.jsonに書き出す")
     parser.add_argument("--show-pending", action="store_true", help="投稿待ち記事の一覧を表示")
-    parser.add_argument("--sync", action="store_true", help="Claude投稿結果をDBに反映する")
-    parser.add_argument("--count", type=int, default=5, help="生成する記事数（デフォルト: 5）")
+    parser.add_argument("--sync",     action="store_true", help="投稿済みURLをDBに反映する")
+    parser.add_argument("--count",    type=int, default=5, help="生成する記事数（デフォルト: 5）")
     parser.add_argument("--schedule", action="store_true", help="スケジューラを起動（毎日POST_TIMEに自動生成）")
     args = parser.parse_args()
 
     setup_logging()
     init_db()
 
-    if not any([args.generate, args.export, args.show_pending, args.sync, args.schedule]):
+    if not any([args.generate, args.kit, args.export, args.show_pending, args.sync, args.schedule]):
         parser.print_help()
-        print("\n💡 まずは: python main.py --generate --export")
+        print("\n💡 まずは: python main.py --generate --kit")
         return
 
     if args.generate:
         asyncio.run(run_generate(count=args.count))
+
+    if args.kit:
+        from tasks.task_manager import export_posting_kit
+        export_posting_kit(limit=args.count)
 
     if args.export:
         from tasks.task_manager import export_pending_tasks

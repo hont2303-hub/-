@@ -1,22 +1,21 @@
 """
 タスクファイル管理
-Python（記事生成）と Claude for Chrome（ブラウザ操作）の橋渡し役。
-pending_posts.json に投稿待ち記事を書き出し、Claude が読み込んで投稿する。
+記事生成結果を「投稿キット」として出力する。
+ユーザーがコピペしてnote.com / X に投稿するための形式。
 """
 import json
 from datetime import datetime
 from pathlib import Path
 
-from shared.models import Article
 from shared.database import get_ready_articles, update_article_status
 
-TASKS_FILE = Path(__file__).parent / "pending_posts.json"
+TASKS_FILE  = Path(__file__).parent / "pending_posts.json"
+REPORT_DIR  = Path(__file__).parent.parent / "data" / "reports"
 
 
 def export_pending_tasks(limit: int = 5) -> list[dict]:
     """
-    DBの ready 状態の記事を読み込み、pending_posts.json に書き出す。
-    Claude for Chrome がこのファイルを読んで投稿を実行する。
+    DBの ready 状態の記事を pending_posts.json に書き出す。
     """
     articles = get_ready_articles(limit=limit)
     if not articles:
@@ -29,10 +28,10 @@ def export_pending_tasks(limit: int = 5) -> list[dict]:
             "id": article.id,
             "title": article.title,
             "body_markdown": article.body_markdown,
-            "summary": article.summary,
-            "hashtags": article.hashtags,
+            "tweet": article.summary,          # X投稿文
+            "tags": article.hashtags,          # タグ5つ（#なし）
+            "quality_score": article.quality_score,
             "status": "pending",
-            "image_path": "",
             "note_url": "",
             "posted_at": "",
         })
@@ -43,36 +42,82 @@ def export_pending_tasks(limit: int = 5) -> list[dict]:
         "articles": tasks,
     }
     TASKS_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(f"✅ {len(tasks)} 件の記事を {TASKS_FILE} に書き出しました")
+    print(f"✅ {len(tasks)} 件を {TASKS_FILE} に書き出しました")
     return tasks
+
+
+def export_posting_kit(limit: int = 5) -> None:
+    """
+    「投稿キット」をMarkdownファイルとして出力する。
+    ユーザーがこれを見ながらnote / Xに投稿する。
+    """
+    articles = get_ready_articles(limit=limit)
+    if not articles:
+        print("投稿待ちの記事がありません。")
+        return
+
+    REPORT_DIR.mkdir(parents=True, exist_ok=True)
+    date_str = datetime.now().strftime("%Y%m%d_%H%M")
+    report_path = REPORT_DIR / f"投稿キット_{date_str}.md"
+
+    lines = [
+        f"# 投稿キット（{datetime.now().strftime('%Y年%m月%d日')}）",
+        f"> 生成記事数: {len(articles)} 件\n",
+        "---\n",
+    ]
+
+    for i, article in enumerate(articles, 1):
+        tags_str = "　".join([f"#{t.lstrip('#')}" for t in article.hashtags])
+        lines += [
+            f"## 記事 {i}",
+            "",
+            f"### タイトル",
+            f"```",
+            article.title,
+            f"```",
+            "",
+            f"### タグ（5つ）",
+            f"```",
+            tags_str,
+            f"```",
+            "",
+            f"### X投稿文（コピペ用）",
+            f"```",
+            article.summary,
+            f"```",
+            "",
+            f"### 本文（note.comに貼り付け）",
+            f"```markdown",
+            article.body_markdown,
+            f"```",
+            "",
+            f"---",
+            "",
+        ]
+
+    report_path.write_text("\n".join(lines), encoding="utf-8")
+    print(f"\n✅ 投稿キットを出力しました:")
+    print(f"   {report_path}")
+    print(f"\n📋 このファイルを開いて、記事を1つずつnote / Xに投稿してください。\n")
 
 
 def show_pending() -> None:
     """投稿待ち記事の一覧を表示する"""
     articles = get_ready_articles(limit=20)
     if not articles:
-        print("投稿待ちの記事はありません")
+        print("\n投稿待ちの記事はありません\n")
         return
 
     print(f"\n📋 投稿待ち記事 ({len(articles)} 件)\n")
     for a in articles:
+        tags = " ".join([f"#{t}" for t in a.hashtags])
         print(f"  [{a.id}] {a.title}")
-        print(f"       文字数: {a.char_count}字 / スコア: {a.quality_score:.2f} / ステータス: {a.status}")
+        print(f"       {a.char_count}字 / スコア:{a.quality_score:.2f} / タグ: {tags}")
     print()
-
-    if TASKS_FILE.exists():
-        data = json.loads(TASKS_FILE.read_text(encoding="utf-8"))
-        print(f"📄 タスクファイル最終更新: {data.get('exported_at', '不明')}")
-        posted = sum(1 for a in data.get("articles", []) if a["status"] == "posted")
-        pending = sum(1 for a in data.get("articles", []) if a["status"] == "pending")
-        print(f"   投稿済み: {posted} 件 / 未投稿: {pending} 件\n")
 
 
 def sync_results_to_db() -> None:
-    """
-    pending_posts.json の投稿結果を DB に反映する。
-    Claude が投稿完了後に status を更新したファイルを読み込む。
-    """
+    """pending_posts.json の投稿結果を DB に反映する"""
     if not TASKS_FILE.exists():
         print("タスクファイルが見つかりません")
         return
@@ -87,5 +132,4 @@ def sync_results_to_db() -> None:
                 note_url=article["note_url"],
             )
             synced += 1
-
     print(f"✅ {synced} 件の投稿結果をDBに反映しました")

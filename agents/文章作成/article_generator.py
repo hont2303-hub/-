@@ -96,24 +96,28 @@ def _parse_article_response(response_text: str, topic: Topic) -> Article:
         end = text.find(end_tag, start)
         return text[start:end].strip() if end != -1 else text[start:].strip()
 
-    title = extract_section(response_text, "===TITLE===", "===BODY===") or topic.title
-    body = extract_section(response_text, "===BODY===", "===SUMMARY===")
-    summary = extract_section(response_text, "===SUMMARY===", "===HASHTAGS===")
-    hashtags_raw = extract_section(response_text, "===HASHTAGS===", "===SCORE===")
+    title   = extract_section(response_text, "===TITLE===",   "===BODY===")   or topic.title
+    body    = extract_section(response_text, "===BODY===",    "===SUMMARY===")
+    summary = extract_section(response_text, "===SUMMARY===", "===TAGS===") or \
+              extract_section(response_text, "===SUMMARY===", "===HASHTAGS===")
+    tags_raw = extract_section(response_text, "===TAGS===",   "===TWEET===") or \
+               extract_section(response_text, "===HASHTAGS===", "===SCORE===")
+    tweet   = extract_section(response_text, "===TWEET===",   "===SCORE===")
     score_raw = extract_section(response_text, "===SCORE===", "===END===")
 
-    # フォールバック: セクションが見つからない場合はレスポンス全体を本文として使用
     if not body:
         logger.warning("区切り文字形式のパースに失敗。レスポンスをそのまま本文として使用します。")
         body = response_text
 
-    # ハッシュタグをリスト化
-    if hashtags_raw:
-        hashtags = [h.strip() for h in hashtags_raw.split(",") if h.strip()]
+    # タグをリスト化（#なし）
+    if tags_raw:
+        tags = [t.strip().lstrip("#") for t in tags_raw.split(",") if t.strip()][:5]
     else:
-        hashtags = [f"#{tag}" for tag in topic.tags[:3]]
+        tags = [t.lstrip("#") for t in topic.tags[:5]]
 
-    # 品質スコアをパース
+    # X投稿文をsummaryに格納（なければsummaryを使用）
+    x_tweet = tweet or summary or topic.title
+
     try:
         quality_score = float(score_raw.strip()) if score_raw.strip() else 0.5
         quality_score = max(0.0, min(1.0, quality_score))
@@ -124,8 +128,8 @@ def _parse_article_response(response_text: str, topic: Topic) -> Article:
         topic_id=topic.id,
         title=title,
         body_markdown=body,
-        summary=(summary or topic.title)[:140],
-        hashtags=hashtags,
+        summary=x_tweet[:280],   # X投稿文をsummaryに保存
+        hashtags=tags,            # タグ（#なし）
         quality_score=quality_score,
         status="draft",
     )
