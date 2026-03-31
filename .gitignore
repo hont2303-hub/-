@@ -1,3 +1,32 @@
+# ============================================================
+# note.com 自動投稿システム
+# ============================================================
+
+# 環境変数・シークレット
+.env
+
+# SQLiteデータベース
+data/db/*.db
+
+# 生成画像・一時ファイル
+data/images/
+data/exports/
+
+# Playwright認証状態（ログイン情報が含まれるため）
+browser/auth_storage/*.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+dist/
+
+# ログ
+logs/
+*.log
+
+# ============================================================
 ### AL ###
 #Template for AL projects for Dynamics 365 Business Central
 #launch.json folder

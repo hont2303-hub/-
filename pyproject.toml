@@ -1,0 +1,26 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "note-automation"
+version = "0.1.0"
+description = "Claude Codeの活用記事をnote.comに自動投稿するシステム"
+requires-python = ">=3.11"
+dependencies = [
+    "anthropic>=0.40.0",
+    "playwright>=1.45.0",
+    "apscheduler>=3.10.0",
+    "python-dotenv>=1.0.0",
+    "pillow>=10.0.0",
+    "aiosqlite>=0.19.0",
+    "pydantic>=2.0.0",
+    "pydantic-settings>=2.0.0",
+    "loguru>=0.7.0",
+]
+
+[project.scripts]
+note-auto = "main:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["."]
