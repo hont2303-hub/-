@@ -78,56 +78,54 @@ JSONで返してください。"""
 
 
 def _parse_article_response(response_text: str, topic: Topic) -> Article:
-    """レスポンスからArticleオブジェクトを生成する"""
-    json_text = _extract_json(response_text)
+    """
+    区切り文字形式のレスポンスをパースしてArticleオブジェクトを生成する。
+    形式:
+      ===TITLE===
+      ===BODY===
+      ===SUMMARY===
+      ===HASHTAGS===
+      ===SCORE===
+      ===END===
+    """
+    def extract_section(text: str, start_tag: str, end_tag: str) -> str:
+        start = text.find(start_tag)
+        if start == -1:
+            return ""
+        start += len(start_tag)
+        end = text.find(end_tag, start)
+        return text[start:end].strip() if end != -1 else text[start:].strip()
 
-    if not json_text:
-        # JSONが取得できない場合はレスポンス全体を本文として扱う
-        logger.warning("レスポンスからJSONを抽出できませんでした。テキストをそのまま使用します。")
-        return Article(
-            topic_id=topic.id,
-            title=topic.title,
-            body_markdown=response_text,
-            summary=topic.title[:100],
-            hashtags=[f"#{tag}" for tag in topic.tags[:3]],
-            quality_score=0.5,
-            status="draft",
-        )
+    title = extract_section(response_text, "===TITLE===", "===BODY===") or topic.title
+    body = extract_section(response_text, "===BODY===", "===SUMMARY===")
+    summary = extract_section(response_text, "===SUMMARY===", "===HASHTAGS===")
+    hashtags_raw = extract_section(response_text, "===HASHTAGS===", "===SCORE===")
+    score_raw = extract_section(response_text, "===SCORE===", "===END===")
 
+    # フォールバック: セクションが見つからない場合はレスポンス全体を本文として使用
+    if not body:
+        logger.warning("区切り文字形式のパースに失敗。レスポンスをそのまま本文として使用します。")
+        body = response_text
+
+    # ハッシュタグをリスト化
+    if hashtags_raw:
+        hashtags = [h.strip() for h in hashtags_raw.split(",") if h.strip()]
+    else:
+        hashtags = [f"#{tag}" for tag in topic.tags[:3]]
+
+    # 品質スコアをパース
     try:
-        data = json.loads(json_text)
-        body = data.get("body_markdown", "")
-        return Article(
-            topic_id=topic.id,
-            title=data.get("title", topic.title),
-            body_markdown=body,
-            summary=data.get("summary", "")[:140],
-            hashtags=data.get("hashtags", [f"#{tag}" for tag in topic.tags[:3]]),
-            quality_score=float(data.get("quality_score", 0.5)),
-            status="draft",
-        )
-    except (json.JSONDecodeError, KeyError, ValueError) as e:
-        logger.error(f"記事レスポンスのパースに失敗: {e}")
-        return Article(
-            topic_id=topic.id,
-            title=topic.title,
-            body_markdown=response_text,
-            summary=topic.title[:100],
-            hashtags=[f"#{tag}" for tag in topic.tags[:3]],
-            quality_score=0.4,
-            status="draft",
-        )
+        quality_score = float(score_raw.strip()) if score_raw.strip() else 0.5
+        quality_score = max(0.0, min(1.0, quality_score))
+    except ValueError:
+        quality_score = 0.5
 
-
-def _extract_json(text: str) -> str:
-    """テキストからJSONブロックを抽出する"""
-    if "```json" in text:
-        start = text.find("```json") + 7
-        end = text.find("```", start)
-        if end > start:
-            return text[start:end].strip()
-    start = text.find("{")
-    end = text.rfind("}") + 1
-    if start >= 0 and end > start:
-        return text[start:end]
-    return ""
+    return Article(
+        topic_id=topic.id,
+        title=title,
+        body_markdown=body,
+        summary=(summary or topic.title)[:140],
+        hashtags=hashtags,
+        quality_score=quality_score,
+        status="draft",
+    )

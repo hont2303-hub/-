@@ -103,7 +103,7 @@ def update_topic_status(topic_id: int, status: str) -> None:
     conn = get_connection()
     with conn:
         conn.execute(
-            "UPDATE topics SET status=?, updated_at=datetime('now','localtime') WHERE id=?",
+            "UPDATE topics SET status=? WHERE id=?",
             (status, topic_id)
         )
     conn.close()
