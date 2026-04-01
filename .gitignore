@@ -7,10 +7,12 @@
 
 # SQLiteデータベース
 data/db/*.db
+data/*.db
 
-# 生成画像・一時ファイル
+# 生成ファイル（投稿キット・画像・エクスポート）
 data/images/
 data/exports/
+data/reports/
 
 # Playwright認証状態（ログイン情報が含まれるため）
 browser/auth_storage/*.json
