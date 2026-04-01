@@ -60,16 +60,36 @@ def export_posting_kit(limit: int = 5) -> None:
     date_str = datetime.now().strftime("%Y%m%d_%H%M")
     report_path = REPORT_DIR / f"投稿キット_{date_str}.md"
 
+    # 曜日ラベルのマッピング
+    day_labels = [
+        "月曜（Tips系）",
+        "火曜（体験談系）",
+        "水曜（note新記事公開）",
+        "木曜（Tips系）",
+        "金曜（体験談・気づき系）",
+    ]
+
     lines = [
         f"# 投稿キット（{datetime.now().strftime('%Y年%m月%d日')}）",
         f"> 生成記事数: {len(articles)} 件\n",
+        "## 今週の投稿スケジュール",
+        "",
+        "| 曜日 | 内容 |",
+        "|---|---|",
+        "| 月・木 | Tips系：すぐ使えるノウハウ投稿 |",
+        "| 火・金 | 体験談・気づき系：実録・失敗談 |",
+        "| 水 | note新記事公開＋告知投稿 |",
+        "| 土 | リプ返信・エンゲージメント強化 |",
+        "| 日 | 翌週のネタ仕込み・企画 |",
+        "",
         "---\n",
     ]
 
     for i, article in enumerate(articles, 1):
         tags_str = "　".join([f"#{t.lstrip('#')}" for t in article.hashtags])
+        day_label = day_labels[i - 1] if i <= len(day_labels) else f"記事 {i}"
         lines += [
-            f"## 記事 {i}",
+            f"## 記事 {i}｜{day_label}",
             "",
             f"### タイトル",
             f"```",
